@@ -1,0 +1,218 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String               @id @default(cuid())
+  email        String               @unique
+  password     String
+  firstName    String?
+  lastName     String?
+  role         String               @default("user")
+  createdAt    DateTime             @default(now())
+  updatedAt    DateTime             @updatedAt
+  
+  // --- ADD THIS LINE ---
+  pipelines    Pipeline[] // This completes the relationship from the User's side
+
+  activities   Activity[]
+  workflows    AutomationWorkflow[]
+  contacts     Contact[]
+  deals        Deal[]
+  integrations Integration[]
+  emailTemplates EmailTemplate[] // Add this line for the new relationship
+
+  @@map("users")
+}
+
+model Contact {
+  id           String        @id @default(cuid())
+  firstName    String?
+  lastName     String?
+  email        String?
+  phone        String?
+  company      String?
+  data         Json?
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+  userId       String
+  activities   Activity[]
+  tags         ContactTag[]
+  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  customFields CustomField[]
+  deals        Deal[]
+
+  @@map("contacts")
+}
+
+model CustomField {
+  id        String   @id @default(cuid())
+  name      String
+  type      String
+  data      Json?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  contactId String
+  contact   Contact  @relation(fields: [contactId], references: [id], onDelete: Cascade)
+
+  @@map("custom_fields")
+}
+
+model Tag {
+  id        String       @id @default(cuid())
+  name      String
+  color     String?
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
+  contacts  ContactTag[]
+
+  @@map("tags")
+}
+
+model ContactTag {
+  id        String   @id @default(cuid())
+  contactId String
+  tagId     String
+  createdAt DateTime @default(now())
+  contact   Contact  @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  tag       Tag      @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@unique([contactId, tagId])
+  @@map("contact_tags")
+}
+
+model Pipeline {
+  id          String          @id @default(cuid())
+  name        String
+  description String?
+  isDefault   Boolean         @default(false)
+  data        Json?
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+  
+  // --- ADD THESE TWO LINES ---
+  userId      String          // This creates the new required column in the database
+  user        User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  deals       Deal[]
+  stages      PipelineStage[]
+
+  @@map("pipelines")
+}
+
+
+model PipelineStage {
+  id         String   @id @default(cuid())
+  name       String
+  order      Int
+  pipelineId String
+  data       Json?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  deals      Deal[]
+  pipeline   Pipeline @relation(fields: [pipelineId], references: [id], onDelete: Cascade)
+
+  @@map("pipeline_stages")
+}
+
+model Deal {
+  id         String        @id @default(cuid())
+  title      String
+  value      Float?
+  currency   String?
+  stageId    String
+  pipelineId String
+  contactId  String?
+  data       Json?
+  createdAt  DateTime      @default(now())
+  updatedAt  DateTime      @updatedAt
+  userId     String
+  activities Activity[]
+  contact    Contact?      @relation(fields: [contactId], references: [id])
+  pipeline   Pipeline      @relation(fields: [pipelineId], references: [id], onDelete: Cascade)
+  stage      PipelineStage @relation(fields: [stageId], references: [id], onDelete: Cascade)
+  user       User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("deals")
+}
+
+model Activity {
+  id        String   @id @default(cuid())
+  type      String
+  note      String?
+  data      Json?
+  createdAt DateTime @default(now())
+  contactId String?
+  dealId    String?
+  userId    String
+  contact   Contact? @relation(fields: [contactId], references: [id])
+  deal      Deal?    @relation(fields: [dealId], references: [id])
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("activities")
+}
+
+model AutomationWorkflow {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+  definition  Json     // This will store the complete flow data (nodes and edges)
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("automation_workflows")
+}
+
+model Integration {
+  id          String   @id @default(cuid())
+  provider    String
+  credentials Json
+  userId      String
+  isActive    Boolean  @default(true)
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, provider])
+  @@map("integrations")
+}
+
+model WebhookLog {
+  id        String   @id @default(cuid())
+  endpoint  String
+  payload   Json
+  response  Json?
+  status    Int?
+  error     String?
+  createdAt DateTime @default(now())
+
+  @@map("webhook_logs")
+}
+
+model EmailTemplate {
+  id        String   @id @default(cuid())
+  name      String
+  subject   String
+  body      String
+  userId    String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("email_templates")
+}
+
+model TokenBlacklist {
+  id        String   @id @default(cuid())
+  token     String   @unique
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@map("token_blacklist")
+}
