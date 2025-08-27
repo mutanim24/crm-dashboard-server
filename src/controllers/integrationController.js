@@ -38,18 +38,6 @@ const upsertKixieCredentials = async (req, res) => {
     const encryptedBusinessId = encrypt(businessId);
     const encryptedApiKey = encrypt(apiKey);
 
-    // Create a dataToSave object for the Prisma query
-    const dataToSave = {
-      encryptedBusinessId: encryptedBusinessId,
-      encryptedApiKey: encryptedApiKey
-    };
-    
-    // Add isActive to the data to save
-    dataToSave.isActive = isActive;
-    
-    // Add diagnostic logging
-    console.log('Data to be saved:', dataToSave);
-
     // Upsert the integration using the composite unique key
     const integration = await prisma.integration.upsert({
       where: {
@@ -59,14 +47,16 @@ const upsertKixieCredentials = async (req, res) => {
         }
       },
       update: {
-        credentials: dataToSave,
-        isActive: true
+        encryptedBusinessId: encryptedBusinessId,
+        encryptedApiKey: encryptedApiKey,
+        isActive: isActive
       },
       create: {
         provider: 'kixie',
         userId: req.user.id,
-        credentials: dataToSave,
-        isActive: true
+        encryptedBusinessId: encryptedBusinessId,
+        encryptedApiKey: encryptedApiKey,
+        isActive: isActive
       },
       select: {
         id: true,
@@ -161,15 +151,8 @@ const initiateCall = async (req, res) => {
       });
     }
     
-    // Add a check for null credentials
-    if (!integration.credentials) {
-      return res.status(400).json({ 
-        message: "Kixie credentials not found for this user." 
-      });
-    }
-    
     // Add robust validation for encrypted credentials
-    if (!integration.credentials.encryptedBusinessId || !integration.credentials.encryptedApiKey) {
+    if (!integration.encryptedBusinessId || !integration.encryptedApiKey) {
       return res.status(400).json({ 
         message: "Incomplete Kixie credentials found for this user." 
       });
@@ -179,8 +162,8 @@ const initiateCall = async (req, res) => {
 
     // Implement Robust Decryption
     try {
-      decryptedBusinessId = decrypt(integration.credentials.encryptedBusinessId);
-      decryptedApiKey = decrypt(integration.credentials.encryptedApiKey);
+      decryptedBusinessId = decrypt(integration.encryptedBusinessId);
+      decryptedApiKey = decrypt(integration.encryptedApiKey);
     } catch (decryptError) {
       console.error('Error decrypting Kixie credentials:', decryptError);
       return res.status(500).json({ 
@@ -307,15 +290,8 @@ const sendSms = async (req, res) => {
       });
     }
     
-    // Add a check for null credentials
-    if (!integration.credentials) {
-      return res.status(400).json({ 
-        message: "Kixie credentials not found for this user." 
-      });
-    }
-    
     // Add robust validation for encrypted credentials
-    if (!integration.credentials.encryptedBusinessId || !integration.credentials.encryptedApiKey) {
+    if (!integration.encryptedBusinessId || !integration.encryptedApiKey) {
       return res.status(400).json({ 
         message: "Incomplete Kixie credentials found for this user." 
       });
@@ -325,8 +301,8 @@ const sendSms = async (req, res) => {
 
     // Implement Robust Decryption
     try {
-      decryptedBusinessId = decrypt(integration.credentials.encryptedBusinessId);
-      decryptedApiKey = decrypt(integration.credentials.encryptedApiKey);
+      decryptedBusinessId = decrypt(integration.encryptedBusinessId);
+      decryptedApiKey = decrypt(integration.encryptedApiKey);
     } catch (decryptError) {
       console.error('Error decrypting Kixie credentials:', decryptError);
       return res.status(500).json({ 
@@ -574,10 +550,300 @@ const toggleKixieIntegration = async (req, res) => {
   }
 };
 
+/**
+ * Simulates a Kixie webhook for testing purposes
+ * @route POST /api/v1/integrations/kixie/webhook/test
+ * @desc Manually create a sample Activity record to mimic a real webhook
+ * @access Private
+ */
+const simulateWebhook = async (req, res) => {
+  try {
+    const { contactId } = req.body;
+    
+    // Validate contactId
+    if (!contactId) {
+      return res.status(400).json({ 
+        message: 'contactId is required' 
+      });
+    }
+    
+    // Verify the contact exists and belongs to the authenticated user
+    const contact = await prisma.contact.findFirst({
+      where: {
+        id: contactId,
+        userId: req.user.id
+      }
+    });
+    
+    if (!contact) {
+      return res.status(404).json({ 
+        message: 'Contact not found or does not belong to the user' 
+      });
+    }
+    
+    // Create a simulated activity
+    const activity = await prisma.activity.create({
+      data: {
+        type: 'simulated_kixie_call',
+        note: 'Simulated Kixie call for testing purposes',
+        userId: req.user.id,
+        contactId: contact.id,
+        data: {
+          simulated: true,
+          timestamp: new Date().toISOString(),
+          contact: {
+            id: contact.id,
+            name: `${contact.firstName} ${contact.lastName}`,
+            phone: contact.phone
+          }
+        }
+      }
+    });
+    
+    console.log(`Simulated webhook activity created: ${activity.id} for contact ${contactId}`);
+    
+    // Respond with success
+    res.status(201).json({
+      success: true,
+      message: 'Webhook simulated successfully',
+      data: {
+        activityId: activity.id,
+        contactId: contact.id,
+        type: activity.type
+      }
+    });
+  } catch (error) {
+    console.error('Error simulating webhook:', error);
+    res.status(500).json({
+      message: 'An unexpected error occurred while simulating the webhook.'
+    });
+  }
+};
+
+/**
+ * Handles incoming webhook events from iClosed/Zapier
+ * @route POST /api/v1/integrations/webhooks/iclosed
+ * @desc Receive webhook events from iClosed/Zapier, parse data, create Contact and Deal records
+ * @access Public
+ */
+const handleIclosedWebhook = async (req, res) => {
+  try {
+    // Log the entire incoming payload
+    console.log('--- ICLOSED WEBHOOK RECEIVED ---');
+    console.log(JSON.stringify(req.body, null, 2));
+
+    // Extract key information from the webhook payload
+    const { contactName, contactEmail, contactPhone, appointmentTitle, userId } = req.body;
+    
+    // Log webhook request
+    await prisma.webhookLog.create({
+      data: {
+        endpoint: '/api/v1/integrations/webhooks/iclosed',
+        payload: req.body,
+      },
+    });
+
+    // Validate required fields
+    if (!contactEmail || !contactName || !appointmentTitle) {
+      console.error('iClosed webhook: Missing required fields', {
+        contactEmail: contactEmail ? 'present' : 'missing',
+        contactName: contactName ? 'present' : 'missing',
+        appointmentTitle: appointmentTitle ? 'present' : 'missing'
+      });
+      return res.status(400).json({ error: 'Missing required fields' });
+    }
+
+    // Find a User (Safely)
+    let finalUserId;
+    console.log('Attempting to find user...');
+    
+    // First, try to find a user based on userId if it's provided in the payload
+    if (userId) {
+      console.log(`Looking for user with ID: ${userId}`);
+      const user = await prisma.user.findUnique({
+        where: { id: userId }
+      });
+      
+      if (user) {
+        finalUserId = user.id;
+        console.log(`Found user with ID: ${finalUserId}`);
+      } else {
+        console.log(`User with ID ${userId} not found, falling back to first user`);
+      }
+    }
+    
+    // If no userId was provided or no user was found, query for the very first user in the entire users table
+    if (!finalUserId) {
+      console.log('Looking for first user in database...');
+      const firstUser = await prisma.user.findFirst({
+        orderBy: { createdAt: 'asc' }
+      });
+      
+      if (firstUser) {
+        finalUserId = firstUser.id;
+        console.log(`Found first user with ID: ${finalUserId}`);
+      } else {
+        console.error('iClosed webhook: No users found in the database');
+        return res.status(400).json({ error: 'No users found in the database' });
+      }
+    }
+    
+    console.log(`Final user ID to be used: ${finalUserId}`);
+
+    // Find or Create the Contact
+    console.log(`Attempting to upsert contact with email: ${contactEmail}`);
+    let contact;
+    try {
+      contact = await prisma.contact.upsert({
+        where: {
+          email: contactEmail
+        },
+        update: {
+          // Update block ensures the existing contact is selected without changing it
+        },
+        create: {
+          firstName: contactName.split(' ')[0] || contactName,
+          lastName: contactName.split(' ')[1] || '',
+          email: contactEmail,
+          phone: contactPhone || null,
+          userId: finalUserId
+        }
+      });
+      console.log(`Successfully upserted contact with ID: ${contact.id}`);
+    } catch (error) {
+      console.error('Error upserting contact:', error);
+      return res.status(500).json({ error: 'Failed to create or find contact' });
+    }
+
+    // Find a Pipeline Stage (Safely)
+    let finalStageId;
+    console.log('Attempting to find pipeline stage...');
+    
+    // First, try to find the user's default pipeline and its first stage
+    console.log(`Looking for default pipeline for user ID: ${finalUserId}`);
+    let defaultPipeline;
+    try {
+      defaultPipeline = await prisma.pipeline.findFirst({
+        where: {
+          isDefault: true,
+          userId: finalUserId
+        },
+        include: {
+          stages: {
+            orderBy: {
+              order: 'asc'
+            },
+            take: 1
+          }
+        }
+      });
+      
+      if (defaultPipeline && defaultPipeline.stages.length > 0) {
+        finalStageId = defaultPipeline.stages[0].id;
+        console.log(`Found default pipeline stage with ID: ${finalStageId}`);
+      } else {
+        console.log('No default pipeline found for user, falling back to first stage in database');
+      }
+    } catch (error) {
+      console.error('Error finding default pipeline:', error);
+      console.log('Falling back to first stage in database');
+    }
+    
+    // If that fails, query for the very first PipelineStage in the entire database
+    if (!finalStageId) {
+      console.log('Looking for first pipeline stage in database...');
+      try {
+        const firstStage = await prisma.pipelineStage.findFirst({
+          orderBy: { order: 'asc' }
+        });
+        
+        if (firstStage) {
+          finalStageId = firstStage.id;
+          console.log(`Found first pipeline stage with ID: ${finalStageId}`);
+        } else {
+          console.error('iClosed webhook: No pipeline stages found in the database');
+          return res.status(400).json({ error: 'No pipeline stages found in the database' });
+        }
+      } catch (error) {
+        console.error('Error finding first pipeline stage:', error);
+        return res.status(400).json({ error: 'No pipeline stages found in the database' });
+      }
+    }
+    
+    console.log(`Final stage ID to be used: ${finalStageId}`);
+
+    // Create the Deal
+    console.log('Attempting to create deal...');
+    let newDeal;
+    try {
+      // We need to find a pipeline for the deal, even if we're using a fallback stage
+      let pipelineId;
+      
+      // Try to use the user's default pipeline
+      if (defaultPipeline) {
+        pipelineId = defaultPipeline.id;
+        console.log(`Using default pipeline with ID: ${pipelineId}`);
+      } else {
+        // Fallback to any pipeline
+        const fallbackPipeline = await prisma.pipeline.findFirst({
+          where: { userId: finalUserId }
+        });
+        
+        if (fallbackPipeline) {
+          pipelineId = fallbackPipeline.id;
+          console.log(`Using fallback pipeline with ID: ${pipelineId}`);
+        } else {
+          // Last resort - use any pipeline
+          const anyPipeline = await prisma.pipeline.findFirst();
+          pipelineId = anyPipeline ? anyPipeline.id : null;
+          console.log(`Using any available pipeline with ID: ${pipelineId}`);
+        }
+      }
+      
+      newDeal = await prisma.deal.create({
+        data: {
+          title: appointmentTitle,
+          contactId: contact.id,
+          userId: finalUserId,
+          pipelineId: pipelineId,
+          stageId: finalStageId
+        }
+      });
+      console.log(`Successfully created deal with ID: ${newDeal.id}`);
+    } catch (error) {
+      console.error('Error creating deal:', error);
+      return res.status(500).json({ error: 'Failed to create deal' });
+    }
+
+    // Log the successful creation
+    console.log(`Successfully created contact ${contact.id} and deal ${newDeal.id} from iClosed webhook`);
+    console.log(`User ID used: ${finalUserId}, Stage ID used: ${finalStageId}`);
+
+    // Respond with 200 OK status and the newly created deal object
+    res.status(200).json(newDeal);
+  } catch (error) {
+    console.error('Unexpected error handling iClosed webhook:', error);
+    
+    // Log error
+    await prisma.webhookLog.create({
+      data: {
+        endpoint: '/api/v1/integrations/webhooks/iclosed',
+        payload: req.body,
+        error: error.message,
+        status: 500,
+      },
+    });
+    
+    res.status(500).json({ error: 'Internal server error' });
+  }
+};
+
 module.exports = {
   upsertKixieCredentials,
   initiateCall,
   sendSms,
   handleKixieWebhook,
-  toggleKixieIntegration
+  toggleKixieIntegration,
+  simulateWebhook,
+  handleIclosedWebhook
 };

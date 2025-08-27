@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const { upsertKixieCredentials, initiateCall, sendSms, handleKixieWebhook, toggleKixieIntegration } = require('../controllers/integrationController');
+const { upsertKixieCredentials, initiateCall, sendSms, handleKixieWebhook, toggleKixieIntegration, simulateWebhook, handleIclosedWebhook } = require('../controllers/integrationController');
 const authMiddleware = require('../middleware/auth');
 
 /**
@@ -37,5 +37,19 @@ router.post('/kixie/webhook', handleKixieWebhook);
  * @access  Private
  */
 router.post('/kixie/toggle', authMiddleware, toggleKixieIntegration);
+
+/**
+ * @route   POST /api/v1/integrations/kixie/webhook/test
+ * @desc    Simulate a Kixie webhook for testing purposes
+ * @access  Private
+ */
+router.post('/kixie/webhook/test', authMiddleware, simulateWebhook);
+
+/**
+ * @route   POST /api/v1/integrations/webhooks/iclosed
+ * @desc    Receive webhook events from iClosed/Zapier
+ * @access  Public
+ */
+router.post('/webhooks/iclosed', handleIclosedWebhook);
 
 module.exports = router;

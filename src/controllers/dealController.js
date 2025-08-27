@@ -158,6 +158,10 @@ const createDeal = async (req, res) => {
   try {
     const { title, value, currency, pipelineId, stageId, contactId, data } = req.body;
 
+    // Convert value to Float with safety check
+    const numericValue = parseFloat(value);
+    const finalValue = isNaN(numericValue) ? 0 : numericValue;
+
     // Check if pipeline exists
     const pipeline = await prisma.pipeline.findFirst({
       where: {
@@ -171,15 +175,14 @@ const createDeal = async (req, res) => {
     }
 
     // Check if stage exists in the pipeline
-    const stage = await prisma.pipelineStage.findFirst({
+    const stage = await prisma.pipelineStage.findUnique({
       where: {
         id: stageId,
-        pipelineId,
       },
     });
 
     if (!stage) {
-      return res.status(404).json({ error: 'Stage not found in the specified pipeline' });
+      return res.status(404).json({ error: 'Stage not found' });
     }
 
     // If contactId is provided, check if contact exists
@@ -200,7 +203,7 @@ const createDeal = async (req, res) => {
     const deal = await prisma.deal.create({
       data: {
         title,
-        value,
+        value: finalValue,
         currency,
         pipelineId,
         stageId,

@@ -62,6 +62,14 @@ app.use('/api/v1/templates', authMiddleware, templateRoutes);
 app.use('/webhooks/kixie', require('./routes/webhooks/kixie'));
 app.use('/webhooks/iclosed', require('./routes/webhooks/iclosed'));
 
+// Special case: iClosed webhook under integrations (no auth required)
+// We need to move this route outside the auth middleware
+const iclosedWebhookRouter = express.Router();
+const { handleIclosedWebhook } = require('./controllers/integrationController');
+
+iclosedWebhookRouter.post('/', handleIclosedWebhook);
+app.use('/api/v1/integrations/webhooks/iclosed', iclosedWebhookRouter);
+
 // Health check endpoint
 app.get('/health', (req, res) => {
   res.status(200).json({ status: 'OK', message: 'Service is healthy' });
