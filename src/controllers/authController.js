@@ -107,9 +107,18 @@ const login = async (req, res) => {
     // Return user without password
     const { password: _, ...userWithoutPassword } = user;
 
+    // Format user data to match frontend expectations
+    const formattedUser = {
+      ...userWithoutPassword,
+      name: `${user.firstName} ${user.lastName}`.trim(),
+      phoneNumber: user.phoneNumber || '',
+      company: user.company || '',
+      jobTitle: user.jobTitle || ''
+    };
+
     res.status(200).json({
       message: 'Login successful',
-      user: userWithoutPassword,
+      user: formattedUser,
       token,
     });
   } catch (error) {
