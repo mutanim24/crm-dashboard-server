@@ -66,9 +66,13 @@ app.use('/webhooks/iclosed', require('./routes/webhooks/iclosed'));
 // We need to move this route outside the auth middleware
 const iclosedWebhookRouter = express.Router();
 const { handleIclosedWebhook } = require('./controllers/integrationController');
+const { handleIncomingWebhook } = require('./controllers/iclosedWebhookController');
 
 iclosedWebhookRouter.post('/', handleIclosedWebhook);
 app.use('/api/v1/integrations/webhooks/iclosed', iclosedWebhookRouter);
+
+// New iClosed webhook endpoint for contact data (no auth required)
+app.use('/api/v1/webhooks/iclosed', require('./routes/webhooks/iclosed'));
 
 // Health check endpoint
 app.get('/health', (req, res) => {
