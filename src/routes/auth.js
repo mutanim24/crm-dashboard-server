@@ -1,5 +1,5 @@
 const express = require('express');
-const { register, login, logout } = require('../controllers/authController');
+const { register, login, logout, changePassword } = require('../controllers/authController');
 const { body } = require('express-validator');
 const handleValidationErrors = require('../middleware/validationErrorHandler');
 const authMiddleware = require('../middleware/auth');
@@ -166,5 +166,28 @@ router.put('/profile', authMiddleware, async (req, res) => {
     res.status(500).json({ error: 'Failed to update user profile' });
   }
 });
+
+/**
+ * @route   PUT /api/v1/auth/password
+ * @desc    Change user password
+ * @access  Private
+ */
+router.put(
+  '/password',
+  authMiddleware,
+  [
+    // Validate input
+    body('currentPassword')
+      .notEmpty()
+      .withMessage('Current password is required')
+      .trim(),
+    body('newPassword')
+      .isLength({ min: 6 })
+      .withMessage('New password must be at least 6 characters long')
+      .trim(),
+  ],
+  handleValidationErrors,
+  changePassword
+);
 
 module.exports = router;
