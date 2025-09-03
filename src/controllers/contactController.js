@@ -318,15 +318,20 @@ const deleteContact = async (req, res) => {
       where: { id: req.params.id },
     });
 
-    // Log activity
-    await prisma.activity.create({
-      data: {
-        type: 'contact_deleted',
-        note: `Deleted contact: ${existingContact.firstName || ''} ${existingContact.lastName || ''}`,
-        userId: req.user.id,
-        contactId: existingContact.id,
-      },
-    });
+    // Try to log activity, but don't fail the request if this fails
+    try {
+      await prisma.activity.create({
+        data: {
+          type: 'contact_deleted',
+          note: `Deleted contact: ${existingContact.firstName || ''} ${existingContact.lastName || ''}`,
+          userId: req.user.id,
+          contactId: existingContact.id,
+        },
+      });
+    } catch (activityError) {
+      console.error('Error logging contact deletion activity:', activityError);
+      // Continue without failing the request
+    }
 
     res.status(204).send();
   } catch (error) {
