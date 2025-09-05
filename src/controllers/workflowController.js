@@ -102,7 +102,16 @@ exports.updateWorkflow = async (req, res) => {
     
     const updatedWorkflow = await prisma.automationWorkflow.update({
       where: { id },
-      data: updateData
+      data: updateData,
+      include: {
+        user: {
+          select: {
+            id: true,
+            name: true,
+            email: true
+          }
+        }
+      }
     });
     
     res.json(updatedWorkflow);
