@@ -1,4 +1,5 @@
 const { prisma } = require('../services/db');
+const { runWorkflow } = require('../../../utils/workflowRunner');
 
 // Create a new workflow
 exports.createWorkflow = async (req, res) => {
@@ -148,5 +149,61 @@ exports.deleteWorkflow = async (req, res) => {
   } catch (error) {
     console.error('Error deleting workflow:', error);
     res.status(500).json({ error: 'Failed to delete workflow' });
+  }
+};
+
+// Run a workflow by ID
+exports.runWorkflow = async (req, res) => {
+  try {
+    const { id } = req.params;
+    
+    // Check if workflow exists and user owns it
+    const workflow = await prisma.automationWorkflow.findFirst({
+      where: {
+        id,
+        userId: req.user.id
+      }
+    });
+    
+    if (!workflow) {
+      return res.status(404).json({ error: 'Workflow not found' });
+    }
+    
+    if (!workflow.definition || !workflow.definition.nodes || !workflow.definition.edges) {
+      return res.status(400).json({ error: 'Workflow definition is invalid or incomplete' });
+    }
+    
+    console.log(`Starting workflow execution for workflow ID: ${id}`);
+    
+    // Execute the workflow using the workflow runner
+    const logs = await runWorkflow(workflow.definition);
+    
+    console.log(`Workflow execution completed for workflow ID: ${id}`);
+    console.log('Execution logs:', logs);
+    
+    // Return the execution logs
+    res.json({
+      success: true,
+      workflowId: id,
+      logs: logs,
+      executedAt: new Date().toISOString()
+    });
+    
+  } catch (error) {
+    console.error(`Error running workflow ${id}:`, error);
+    
+    // Return error logs if available
+    const errorLogs = [
+      `Workflow execution failed: ${error.message}`,
+      'Stack trace:',
+      error.stack
+    ];
+    
+    res.status(500).json({
+      success: false,
+      workflowId: id,
+      logs: errorLogs,
+      executedAt: new Date().toISOString()
+    });
   }
 };

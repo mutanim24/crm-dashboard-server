@@ -18,4 +18,7 @@ router.put('/:id', auth, workflowController.updateWorkflow);
 // DELETE /api/v1/workflows/:id - Delete a workflow
 router.delete('/:id', auth, workflowController.deleteWorkflow);
 
+// POST /api/v1/workflows/:id/run - Run a workflow
+router.post('/:id/run', auth, workflowController.runWorkflow);
+
 module.exports = router;
